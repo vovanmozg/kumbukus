@@ -1,0 +1,24 @@
+#!/bin/bash
+
+set -e
+
+REPO_URL="git@gitlab.com:vovanmozg/linuxtools"
+TARGET_DIR="/tmp/.env_repo_$(date +%s)"
+ENV_FILE="$HOME/.env"
+
+echo "Cloning repository..."
+git clone "$REPO_URL" "$TARGET_DIR"
+
+if [ -f "$TARGET_DIR/.env" ]; then
+    echo "Installing .env to $ENV_FILE..."
+    cp "$TARGET_DIR/.env" "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+else
+    echo "Error: .env file not found in the repository!"
+    exit 1
+fi
+
+echo "Cleaning up..."
+rm -rf "$TARGET_DIR"
+
+echo "Installation complete!"
