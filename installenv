@@ -2,7 +2,7 @@
 
 set -e
 
-REPO_URL="git@gitlab.com:vovanmozg/linuxtools"
+REPO_URL="git@gitlab.com:vovanmozg/env"
 TARGET_DIR="/tmp/.env_repo_$(date +%s)"
 ENV_FILE="$HOME/.env"
 
