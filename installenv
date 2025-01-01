@@ -2,11 +2,21 @@
 
 set -e
 
-REPO_URL="git@gitlab.com:vovanmozg/env"
+if [ -z "$1" ]; then
+    echo "Usage: bash <(curl -fsSL https://raw.githubusercontent.com/vovanmozg/linuxtools/main/installenv) <repository_url>"
+    exit 1
+fi
+
+REPO_URL="$1"
 TARGET_DIR="/tmp/.env_repo_$(date +%s)"
 ENV_FILE="$HOME/.env"
 
-echo "Cloning repository..."
+if [ -f "$ENV_FILE" ]; then
+    echo "Error: $ENV_FILE already exists. Installation aborted."
+    exit 1
+fi
+
+echo "Cloning repository from $REPO_URL..."
 git clone "$REPO_URL" "$TARGET_DIR"
 
 if [ -f "$TARGET_DIR/.env" ]; then
