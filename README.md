@@ -7,7 +7,7 @@ Tools can use some ENV vars. Installing some tool can require .env file. .env fi
 bash <(curl -fsSL https://raw.githubusercontent.com/vovanmozg/linuxtools/main/installenv) <repository_url>
 ```
 
-where <repository_url> is repo containing .env file.
+where <repository_url> is repo containing .env file. Example
 
 ## Notes
 
