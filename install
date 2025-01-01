@@ -1,0 +1,68 @@
+#!/bin/bash
+
+set -e
+
+REPO_URL="https://github.com/vovanmozg/linuxtools"
+TARGET_DIR="/tmp/linuxtools_$(date +%s)"
+INSTALL_DIR="$HOME/bin"
+
+# Функция для отображения меню выбора
+function select_scripts() {
+    echo "Fetching script list..."
+    # Клонирование репозитория (только необходимые файлы)
+    git clone --depth=1 "$REPO_URL" "$TARGET_DIR" >/dev/null 2>&1
+
+    # Получение списка файлов-скриптов
+    SCRIPTS=$(find "$TARGET_DIR" -maxdepth 1 -type f -name "*.sh" -exec basename {} \;)
+
+    if [ -z "$SCRIPTS" ]; then
+        echo "No scripts found in the repository."
+        exit 1
+    fi
+
+    echo "Available scripts:"
+    SELECTED=()
+
+    # Создание меню
+    PS3="Enter the number of the script to select (or type 'done' to proceed): "
+    select script in $SCRIPTS; do
+        if [[ $REPLY == "done" ]]; then
+            break
+        elif [[ -n $script ]]; then
+            SELECTED+=("$script")
+            echo "Selected: $script"
+        else
+            echo "Invalid selection. Try again."
+        fi
+    done
+
+    echo "${#SELECTED[@]} script(s) selected."
+    echo "${SELECTED[@]}"
+    echo ""
+}
+
+# Проверка и создание директории ~/bin
+if [ ! -d "$INSTALL_DIR" ]; then
+    mkdir -p "$INSTALL_DIR"
+fi
+
+# Вызов меню выбора
+select_scripts
+
+# Установка выбранных скриптов
+for script in "${SELECTED[@]}"; do
+    SCRIPT_PATH="$TARGET_DIR/$script"
+    if [ -f "$SCRIPT_PATH" ]; then
+        echo "Installing $script to $INSTALL_DIR..."
+        cp "$SCRIPT_PATH" "$INSTALL_DIR/"
+        chmod +x "$INSTALL_DIR/$script"
+    else
+        echo "Error: $script not found!"
+    fi
+done
+
+# Очистка временных файлов
+echo "Cleaning up..."
+rm -rf "$TARGET_DIR"
+
+echo "Installation complete!"
