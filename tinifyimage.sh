@@ -6,7 +6,7 @@
 source ~/.env
 
 if [ "$#" -ne 1 ]; then
-    echo "Using: $0 file_name.jpg"
+    echo "Usage: $0 file_name.jpg"
     exit 1
 fi
 
@@ -19,54 +19,51 @@ if [ ! -d "$OPTIMIZED_DIR" ]; then
 fi
 
 OPTIMIZED_FILE="${OPTIMIZED_DIR}/${FILE_NAME}"
-OPTIMIZED_FILE_PROGRESS="${OPTIMIZED_FILE}.tmp"
 METADATA_FILE="${OPTIMIZED_DIR}/${FILE_NAME}.metadata"
 
 # Сохраняем метаданные из исходного изображения
 exiftool -j "$SOURCE_FILE" > "$METADATA_FILE"
-sed -i "s#\"SourceFile\": \"$FILE_NAME\"#\"SourceFile\": \"$OPTIMIZED_FILE\"#" "$METADATA_FILE"
 
-touch "${OPTIMIZED_FILE_PROGRESS}"
+# Определяем ориентацию исходного изображения
+orientation=$(exiftool -s -s -s -Orientation "$SOURCE_FILE")
+echo "Original orientation: $orientation"
 
-# https://tinypng.com/developers/reference#compressing-images
-response=$(curl --user api:$TINYPNG_API_KEY --dump-header /dev/stdout --data-binary @"$SOURCE_FILE" https://api.tinify.com/shrink)
+# Приводим изображение к нормальной ориентации физически
+TEMP_FILE="${OPTIMIZED_DIR}/temp_${FILE_NAME}"
+
+cp "$SOURCE_FILE" "$TEMP_FILE"
+if [ "$orientation" = "Rotate 90 CW" ]; then
+    jpegtran -rotate 90 -copy none -outfile "$TEMP_FILE" "$TEMP_FILE"
+elif [ "$orientation" = "Rotate 270 CW" ]; then
+    jpegtran -rotate 270 -copy none -outfile "$TEMP_FILE" "$TEMP_FILE"
+elif [ "$orientation" = "Rotate 180" ]; then
+    jpegtran -rotate 180 -copy none -outfile "$TEMP_FILE" "$TEMP_FILE"
+fi
+
+# Удаляем ориентацию из метаданных
+exiftool -overwrite_original -all= "$TEMP_FILE"
+
+# Восстанавливаем оригинальные метаданные без ориентации
+exiftool -overwrite_original -tagsfromfile "$SOURCE_FILE" -all:all -Orientation=Horizontal "$TEMP_FILE"
+
+# Сжимаем изображение через TinyPNG
+response=$(curl --user api:$TINYPNG_API_KEY --dump-header /dev/stdout --data-binary @"$TEMP_FILE" https://api.tinify.com/shrink)
 
 location_url=$(echo "$response" | grep -i Location: | awk '{print $2}' | tr -d '\r')
-rm "${OPTIMIZED_FILE_PROGRESS}"
 
-# Если location_url не пустой, делаем второй запрос
 if [ ! -z "$location_url" ]; then
     curl -L "$location_url" --output "$OPTIMIZED_FILE"
 
-    # Поворот изображения в соответствии с ориентацией
-    orientation=$(exiftool -s -s -s -Orientation "$SOURCE_FILE")
-    echo '------------'
-    echo $orientation
-    echo '------------'
-
-    if [ "$orientation" = "Rotate 90 CW" ]; then
-        jpegtran -rotate 90 -copy all -outfile "$OPTIMIZED_FILE" "$OPTIMIZED_FILE"
-        echo "Restored rotation"
-    elif [ "$orientation" = "Rotate 270 CW" ]; then
-        jpegtran -rotate 270 -copy all -outfile "$OPTIMIZED_FILE" "$OPTIMIZED_FILE"
-        echo "Restored rotation"
-    elif [ "$orientation" = "Rotate 180" ]; then
-        jpegtran -rotate 180 -copy all -outfile "$OPTIMIZED_FILE" "$OPTIMIZED_FILE"
-        echo "Restored rotation"
-    fi
-
-
-    # Восстанавливаем метаданные в оптимизированное изображение
-    exiftool -overwrite_original -json="$METADATA_FILE" "$OPTIMIZED_FILE"
-    # Удаление ориентации из метаданных (опционально)
-    exiftool -overwrite_original -Orientation=Horizontal "$OPTIMIZED_FILE"
-
-    touch -r "$SOURCE_FILE" "$OPTIMIZED_FILE"
-
-    # Удаляем временный файл с метаданными
+    # Удаляем временные файлы
+    rm "$TEMP_FILE"
     rm "$METADATA_FILE"
+
+    # Восстанавливаем временную метку исходного файла
+    touch -r "$SOURCE_FILE" "$OPTIMIZED_FILE"
 
     echo "Оптимизация завершена: $OPTIMIZED_FILE"
 else
     echo "Не удалось извлечь URL из заголовка Location."
+    rm "$TEMP_FILE"
+    exit 1
 fi
