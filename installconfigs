@@ -1,4 +1,3 @@
-
 #!/bin/bash
 set -e
 
@@ -18,3 +17,5 @@ echo "Cleaning up..."
 rm -rf "$TARGET_DIR"
 
 echo "Installation complete!"
+echo "Add the following line to your ~/.zshrc to source the configuration:"
+echo "source ~/.kumbukus/config"
