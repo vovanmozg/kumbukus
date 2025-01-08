@@ -1,0 +1,20 @@
+
+#!/bin/bash
+set -e
+
+REPO_URL="https://github.com/vovanmozg/kumbukus"
+TARGET_DIR="/tmp/kumbukusconfig_$(date +%s)"
+INSTALL_DIR="$HOME/.kumbukus"
+
+echo "Cloning repository..."
+git clone --depth=1 "$REPO_URL" "$TARGET_DIR" >/dev/null 2>&1
+
+mkdir -p "$INSTALL_DIR"
+
+echo "Installing config files to $INSTALL_DIR..."
+cp -R "$TARGET_DIR/config/"* "$INSTALL_DIR"/
+
+echo "Cleaning up..."
+rm -rf "$TARGET_DIR"
+
+echo "Installation complete!"
