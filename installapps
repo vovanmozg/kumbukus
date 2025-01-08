@@ -44,7 +44,7 @@ fi
 select_scripts
 
 for script in "${SELECTED[@]}"; do
-    SCRIPT_PATH="$TARGET_DIR/$script"
+    SCRIPT_PATH="$TARGET_DIR/apps/$script"
     if [ -f "$SCRIPT_PATH" ]; then
         echo "Installing $script to $INSTALL_DIR..."
         cp "$SCRIPT_PATH" "$INSTALL_DIR/"
