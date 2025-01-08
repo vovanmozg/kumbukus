@@ -3,7 +3,7 @@
 set -e
 
 if [ -z "$1" ]; then
-    echo "Usage: bash <(curl -fsSL https://raw.githubusercontent.com/vovanmozg/linuxtools/main/installenv) <repository_url>"
+    echo "Usage: bash <(curl -fsSL https://raw.githubusercontent.com/vovanmozg/kumbukus/main/installenv) <repository_url>"
     exit 1
 fi
 

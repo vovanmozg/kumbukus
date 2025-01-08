@@ -4,7 +4,7 @@
 Tools can use some ENV vars. Installing some tool can require .env file. .env file placed in separated repository and can be installed with install script. To install, run the following command in your terminal:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/vovanmozg/linuxtools/main/installenv) <repository_url>
+bash <(curl -fsSL https://raw.githubusercontent.com/vovanmozg/kumbukus/main/installenv) <repository_url>
 ```
 
 where <repository_url> is repo containing .env file. Example
