@@ -41,6 +41,3 @@ After installing the script, add the following line to your `~/.zshrc` to source
 ```bash
 source ~/.kumbukus/config
 ```
-
-- The script is designed to work with repositories that include a `.env` file. If the file is missing, the installation will fail with an error.
-- Make sure `git` is installed before running the script.
