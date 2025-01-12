@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# requirement: vendor/docker
+# requirement: vendor/media_tools
+
 if ! command -v docker &>/dev/null; then
   echo "Error: Docker is not installed. Please install Docker and try again."
   exit 1

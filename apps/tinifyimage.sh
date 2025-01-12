@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# requirements: curl, exiftool
-# install: sudo apt install curl exiftool
+# requirement: vendor/curl
+# requirement: vendor/exiftool
 
 source ~/.env
 

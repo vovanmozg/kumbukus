@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# requirement: vendor/imagemagick
+
 source ~/.env
 
 # Проверка на наличие аргумента (имя файла PDF)

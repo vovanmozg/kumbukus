@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# requirement: vendor/imagemagick
+
 if [ "$#" -ne 1 ]; then
     echo "Using: $0 <directory>"
     exit 1

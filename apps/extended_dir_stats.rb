@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 
-# Показывает статистику в таком формате:
+# Shows stats in this format:
 
 # Statistics for directory: /home/user/data
 # Total files: 4169
@@ -31,7 +31,6 @@
 require 'find'
 require 'gtk3'
 
-# Define the size ranges in bytes
 SIZE_RANGES = {
   "1KB" => 1024,
   "10KB" => 10240,
@@ -42,7 +41,6 @@ SIZE_RANGES = {
   "1GB" => 1024 * 1024 * 1024
 }
 
-# Initialize the statistics hash
 stats = {
   file_count: 0,
   dir_count: 0,
@@ -56,7 +54,6 @@ SIZE_RANGES.each do |range, _|
   stats[:dir_size_ranges][range] = [0, 0]
 end
 
-# Method to categorize sizes
 def categorize_size(size)
   SIZE_RANGES.each do |range, limit|
     if size <= limit
@@ -66,7 +63,6 @@ def categorize_size(size)
   return SIZE_RANGES.keys.last, :above
 end
 
-# Method to update statistics
 def update_stats(stats, type, size)
   SIZE_RANGES.each do |range, limit|
     if size <= limit
@@ -77,7 +73,6 @@ def update_stats(stats, type, size)
   end
 end
 
-# Check if directory is passed
 if ARGV.empty?
   puts "Usage: ruby script.rb <directory>"
   exit
@@ -128,7 +123,6 @@ stats[:dir_size_ranges].each do |range, counts|
   stats_text += "#{range}: #{counts[0]} below, #{counts[1]} above\n"
 end
 
-# Create a GUI window to display the statistics
 Gtk.init
 
 window = Gtk::Window.new("Directory Statistics")
@@ -141,13 +135,11 @@ vbox.set_homogeneous(false)
 label = Gtk::Label.new("Statistics for directory: #{directory}")
 vbox.pack_start(label, expand: false, fill: false, padding: 10)
 
-# Create a TextView and put the stats_text in it
 text_view = Gtk::TextView.new
 text_view.buffer.text = stats_text
 text_view.editable = false
 text_view.wrap_mode = Gtk::WrapMode::WORD
 
-# Add the TextView to a ScrolledWindow
 scrolled_window = Gtk::ScrolledWindow.new
 scrolled_window.set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC)
 scrolled_window.add(text_view)
