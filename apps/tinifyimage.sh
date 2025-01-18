@@ -5,12 +5,18 @@
 
 source ~/.env
 
-if [ "$#" -ne 1 ]; then
-    echo "Usage: $0 file_name.jpg"
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+    echo "Usage: $0 file_name.jpg [--no-metadata]"
     exit 1
 fi
 
 SOURCE_FILE="$1"
+NO_METADATA=false
+
+if [ "$2" == "--no-metadata" ]; then
+    NO_METADATA=true
+fi
+
 FILE_NAME=$(basename "$SOURCE_FILE")
 OPTIMIZED_DIR="$(dirname "$SOURCE_FILE")/optimized"
 
@@ -19,33 +25,41 @@ if [ ! -d "$OPTIMIZED_DIR" ]; then
 fi
 
 OPTIMIZED_FILE="${OPTIMIZED_DIR}/${FILE_NAME}"
-METADATA_FILE="${OPTIMIZED_DIR}/${FILE_NAME}.metadata"
+OPTIMIZED_FILE_PROGRESS="${OPTIMIZED_FILE}.tmp"
+METADATA_FILE="${OPTIMIZED_FILE}.metadata"
 
-# Сохраняем метаданные из исходного изображения
-exiftool -j "$SOURCE_FILE" > "$METADATA_FILE"
+if [ "$NO_METADATA" == false ]; then
+    exiftool -j "$SOURCE_FILE" > "$METADATA_FILE"
+else
+    touch "${OPTIMIZED_FILE_PROGRESS}"
+fi
 
-# Сжимаем изображение через TinyPNG
+# https://tinypng.com/developers/reference#compressing-images
 response=$(curl --user api:$TINYPNG_API_KEY --dump-header /dev/stdout --data-binary @"$SOURCE_FILE" https://api.tinify.com/shrink)
 
 location_url=$(echo "$response" | grep -i Location: | awk '{print $2}' | tr -d '\r')
 
+# Remove progress showing file
+if [ "$NO_METADATA" == true ]; then
+    rm "${OPTIMIZED_FILE_PROGRESS}"
+fi
+
 if [ ! -z "$location_url" ]; then
     curl -L "$location_url" --output "$OPTIMIZED_FILE"
 
-    # Удаляем все существующие метаданные из сжатого изображения
-    exiftool -overwrite_original -all= "$OPTIMIZED_FILE"
+    if [ "$NO_METADATA" == false ]; then
+        exiftool -overwrite_original -all= "$OPTIMIZED_FILE"
 
-    # Восстанавливаем метаданные из исходного файла без ориентации
-    exiftool -overwrite_original -tagsfromfile "$SOURCE_FILE" -all:all -Orientation=Horizontal "$OPTIMIZED_FILE"
+        exiftool -overwrite_original -tagsfromfile "$SOURCE_FILE" -all:all -Orientation=Horizontal "$OPTIMIZED_FILE"
 
-    # Восстанавливаем временную метку исходного файла
+        rm "$METADATA_FILE"
+    fi
+
+    # Restore timestamp
     touch -r "$SOURCE_FILE" "$OPTIMIZED_FILE"
 
-    # Удаляем временный файл метаданных
-    rm "$METADATA_FILE"
-
-    echo "Оптимизация завершена: $OPTIMIZED_FILE"
+    echo "Compression finished: $OPTIMIZED_FILE"
 else
-    echo "Не удалось извлечь URL из заголовка Location."
+    echo "Error extracting URL from Location header"
     exit 1
 fi

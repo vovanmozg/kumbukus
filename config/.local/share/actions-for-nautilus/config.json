@@ -11,6 +11,11 @@
           },
           {
             "type": "command",
+            "label": "Tinify without metadata",
+            "command_line": "tinifyimage.sh %f --no-metadata"
+          },
+          {
+            "type": "command",
             "label": "Optimize image",
             "command_line": "optimizeimagejpegoptim.sh %f",
             "filetypes": [
