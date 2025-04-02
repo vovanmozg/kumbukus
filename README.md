@@ -10,6 +10,12 @@ bash <(curl -fsSL https://raw.githubusercontent.com/vovanmozg/kumbukus/main/inst
 
 It clones the repository and lets you select which scripts to install in your `~/bin` folder.
 
+You can create your own repository with custom apps and install them using:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/vovanmozg/kumbukus/main/installapps) <repository_url>
+```
+
 ### configs
 
 Use `installconfigs` to install additional configs:
@@ -20,7 +26,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/vovanmozg/kumbukus/main/inst
 
 ## Env
 
-Tools can use some ENV vars. Installing some tool can require .env file. .env file placed in separated repository and can be installed with install script. To install, run the following command in your terminal:
+Tools may use environment variables. Some tools require a `.env` file, which is stored in a separate repository. You can install the `.env` file using the install script.
 
 ### Using installenv
 
@@ -30,9 +36,9 @@ Run:
 bash <(curl -fsSL https://raw.githubusercontent.com/vovanmozg/kumbukus/main/installenv) <repository_url>
 ```
 
-where <repository_url> is repo containing .env file.
+Replace `<repository_url>` with the repository containing your `.env` file.
 
-This fetches the `.env` file from <repository_url> and places it in the project or your `.config` folder, depending on your setup.
+This command fetches the `.env` file from the specified repository and places it in your project or `.config` folder, depending on your setup.
 
 ## Notes
 
