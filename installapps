@@ -2,7 +2,10 @@
 
 set -e
 
-REPO_URL="https://github.com/vovanmozg/kumbukus"
+# Default repository URL
+DEFAULT_REPO_URL="https://github.com/vovanmozg/kumbukus"
+REPO_URL=${1:-$DEFAULT_REPO_URL}
+
 TARGET_DIR="/tmp/kumbukus_$(date +%s)"
 INSTALL_DIR="$HOME/bin"
 
@@ -10,7 +13,7 @@ function select_scripts() {
     echo "Fetching script list..."
     git clone --depth=1 "$REPO_URL" "$TARGET_DIR" >/dev/null 2>&1
 
-    SCRIPTS=$(find "$TARGET_DIR/apps" -maxdepth 1 -type f -name "*.sh" -exec basename {} \;)
+    SCRIPTS=$(find "$TARGET_DIR/apps" -maxdepth 1 -type f -executable -exec basename {} \;)
 
     if [ -z "$SCRIPTS" ]; then
         echo "No scripts found in the repository."
