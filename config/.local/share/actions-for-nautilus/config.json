@@ -58,6 +58,14 @@
             "type": "command",
             "label": "PDF ultra compress",
             "command_line": " compresspdf.sh %f --width=1000"
+          },
+          {
+            "type": "command",
+            "label": "Merge PDFs",
+            "command_line": "mergepdf.sh %f",
+            "filetypes": [
+              "directory"
+            ]
           }
         ]
       },
