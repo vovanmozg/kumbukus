@@ -1,0 +1,88 @@
+#!/bin/bash
+#
+# scans2pdf - combine images from a folder into a single PDF (kept under ~5 MB).
+#
+# requirement: vendor/imagemagick
+# requirement: vendor/jpegoptim
+# requirement: vendor/bc
+#
+# Usage:
+#   scans2pdf [options] <folder>
+#
+# Options:
+#   --rotate=N       Rotation in degrees (90, 180, 270, ...)
+#   --brightness=N   Brightness from -100 to 100 (0 = unchanged)
+#                      positive = lighter, negative = darker
+#                      e.g. 20 = a bit lighter, -30 = noticeably darker
+#   --contrast=N     Contrast from -100 to 100 (0 = unchanged)
+#                      positive = more contrast, negative = flatter
+#                      e.g. 30 = crisper text/stamps, -20 = softer
+#   --dpi=N          Resolution (default 150)
+#                      150 is enough for passports/documents; 300 = scan quality
+#
+# Examples:
+#   scans2pdf ~/scans/passport/
+#   scans2pdf --rotate=90 ~/scans/passport/
+#   scans2pdf --brightness=10 --contrast=30 ~/scans/passport/
+#   scans2pdf --dpi=200 ~/scans/passport/
+#
+# Output: a PDF next to the folder (<folder_name>.pdf). Images are scaled to A4
+# at the chosen DPI and jpegoptim'd so the total stays under ~5 MB.
+
+ROTATE=0
+BRIGHTNESS=100
+CONTRAST=100
+DPI=150
+
+while [[ "$1" == --* ]]; do
+  case "$1" in
+    --rotate=*) ROTATE="${1#*=}"; shift ;;
+    --brightness=*) BRIGHTNESS="${1#*=}"; shift ;;
+    --contrast=*) CONTRAST="${1#*=}"; shift ;;
+    --dpi=*) DPI="${1#*=}"; shift ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
+  esac
+done
+
+DIR="${1:-.}"
+
+if [ ! -d "$DIR" ]; then
+  echo "Directory not found: $DIR"
+  exit 1
+fi
+
+COUNT=$(find "$DIR" -maxdepth 1 -type f \( -iname "*.png" -o -iname "*.jpg" \) | wc -l)
+if [ "$COUNT" -eq 0 ]; then
+  echo "No images found in $DIR"
+  exit 1
+fi
+
+MAX_KB=5120
+TARGET_KB=$(( MAX_KB * 80 / 100 / COUNT ))
+echo "Files: $COUNT, target per image: ${TARGET_KB}k"
+
+TMPDIR=$(mktemp -d /tmp/scans2pdf_XXXXXX)
+trap "rm -rf $TMPDIR" EXIT
+
+CONVERT_OPTS=""
+[ "$ROTATE" != "0" ] && CONVERT_OPTS+=" -rotate $ROTATE"
+[ "$BRIGHTNESS" != "100" -o "$CONTRAST" != "100" ] && CONVERT_OPTS+=" -brightness-contrast ${BRIGHTNESS},${CONTRAST}"
+
+for FILE in "$DIR"/*.png "$DIR"/*.jpg "$DIR"/*.PNG "$DIR"/*.JPG; do
+  [ -f "$FILE" ] || continue
+  NAME=$(basename "${FILE%.*}.jpg")
+  # A4 at target DPI: 8.27*DPI x 11.69*DPI
+  A4W=$(echo "$DPI * 827 / 100" | bc)
+  A4H=$(echo "$DPI * 1169 / 100" | bc)
+  convert "$FILE" -resize "${A4W}x${A4H}" -units PixelsPerInch -density "$DPI" $CONVERT_OPTS "$TMPDIR/$NAME"
+  jpegoptim --force --size="${TARGET_KB}k" "$TMPDIR/$NAME" >/dev/null
+done
+
+DIRNAME=$(basename "$(realpath "$DIR")")
+PARENT=$(dirname "$(realpath "$DIR")")
+OUTPDF="$PARENT/$DIRNAME.pdf"
+
+readarray -t IMAGES < <(find "$TMPDIR" -maxdepth 1 -type f -iname "*.jpg" | sort)
+convert "${IMAGES[@]}" -density "$DPI" "$OUTPDF"
+
+echo "$OUTPDF"

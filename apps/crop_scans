@@ -1,0 +1,102 @@
+#!/bin/bash
+
+# requirement: vendor/imagemagick
+#
+# Deskew and auto-crop scanned images to their content, into DIR/cropped/.
+# --margin sets the whitespace kept around the detected content; --bottom adds
+# extra space at the bottom only (handy for ID documents like residence permits
+# whose layout needs more room below).
+
+DIR=""
+MARGIN=40
+BOTTOM_EXTRA=0
+
+usage() {
+  cat <<EOF
+Usage: crop_scans [options] [DIR]
+  -m, --margin N   margin around detected content (default: 40)
+  -b, --bottom N   extra margin added only to the bottom (default: 0)
+
+Processes *.png, *.jpg, *.jpeg (case-insensitive) in DIR (default: cwd).
+Output goes to DIR/cropped/ keeping original filenames.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -m|--margin) MARGIN="$2"; shift 2 ;;
+    -b|--bottom) BOTTOM_EXTRA="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) DIR="$1"; shift ;;
+  esac
+done
+
+DIR="${DIR:-.}"
+OUT="$DIR/cropped"
+mkdir -p "$OUT"
+
+shopt -s nullglob nocaseglob
+FILES=("$DIR"/*.png "$DIR"/*.jpg "$DIR"/*.jpeg)
+shopt -u nullglob nocaseglob
+
+echo "→ source : $DIR"
+echo "→ output : $OUT"
+echo "→ margin : $MARGIN (bottom +$BOTTOM_EXTRA)"
+echo "→ found  : ${#FILES[@]} image file(s)"
+
+if [ "${#FILES[@]}" -eq 0 ]; then
+  echo "✗ no .png/.jpg/.jpeg in $DIR" >&2
+  echo "  contents (first 20):" >&2
+  ls -1 "$DIR" 2>/dev/null | head -20 >&2
+  exit 1
+fi
+
+OK=0; FAIL=0
+ERRLOG=$(mktemp /tmp/crop_err.XXXXXX)
+trap 'rm -f "$ERRLOG"' EXIT
+
+for FILE in "${FILES[@]}"; do
+  NAME=$(basename "$FILE")
+  TMP=$(mktemp /tmp/crop_XXXXXX.png)
+
+  if ! convert "$FILE" -deskew 40% "$TMP" 2>"$ERRLOG"; then
+    echo "✗ $NAME — deskew failed" >&2
+    cat "$ERRLOG" >&2
+    rm -f "$TMP"
+    FAIL=$((FAIL+1)); continue
+  fi
+
+  INFO=$(convert "$TMP" \
+       -colorspace Gray -blur 0x2 -edge 2 -blur 0x5 -threshold 10% \
+       -morphology Close Disk:30 \
+       -trim -format '%w %h %X %Y' info: 2>"$ERRLOG")
+  if [ -z "$INFO" ]; then
+    echo "✗ $NAME — bbox detect failed" >&2
+    cat "$ERRLOG" >&2
+    rm -f "$TMP"
+    FAIL=$((FAIL+1)); continue
+  fi
+  read W H X Y <<< "$INFO"
+
+  X=${X#+}; Y=${Y#+}
+  CX=$((X - MARGIN)); CY=$((Y - MARGIN))
+  CW=$((W + 2 * MARGIN)); CH=$((H + 2 * MARGIN + BOTTOM_EXTRA))
+  [ "$CX" -lt 0 ] && CX=0
+  [ "$CY" -lt 0 ] && CY=0
+
+  OUT_FILE="$OUT/$NAME"
+  if convert "$TMP" -crop "${CW}x${CH}+${CX}+${CY}" +repage "$OUT_FILE" 2>"$ERRLOG"; then
+    echo "→ $NAME  ${CW}x${CH}+${CX}+${CY}"
+    OK=$((OK+1))
+  else
+    echo "✗ $NAME — crop failed" >&2
+    cat "$ERRLOG" >&2
+    FAIL=$((FAIL+1))
+  fi
+  rm -f "$TMP"
+done
+
+echo ""
+echo "→ done   : $OK ok, $FAIL failed → $OUT"
+[ "$FAIL" -gt 0 ] && exit 1
+exit 0

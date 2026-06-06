@@ -1,0 +1,76 @@
+#!/bin/bash
+set -euo pipefail
+
+# requirement: vendor/imagemagick
+#
+# Resize images in a folder based on wNNN/hNNN in the folder name.
+# Usage: resize_folder <folder>
+#
+# Folder name patterns:
+#   "some folder w1200"  → resize all images to width 1200 (keep aspect ratio)
+#   "some folder h800"   → resize all images to height 800 (keep aspect ratio)
+#   Both w and h present → skip (ambiguous)
+#   Neither present      → skip
+#
+# Resized images are saved in a "resized" subfolder, originals untouched.
+
+if [ "$#" -lt 1 ]; then
+  echo "Usage: $0 <folder>"
+  exit 1
+fi
+
+FOLDER="$1"
+
+if [ ! -d "$FOLDER" ]; then
+  echo "Error: '$FOLDER' is not a directory" >&2
+  exit 1
+fi
+
+DIRNAME="$(basename "$FOLDER")"
+
+# Extract wNNN and hNNN as separate words (word boundaries)
+W_MATCH=$(echo "$DIRNAME" | grep -oP '(?<![a-zA-Z])w(\d+)(?![a-zA-Z])' | head -1 || true)
+H_MATCH=$(echo "$DIRNAME" | grep -oP '(?<![a-zA-Z])h(\d+)(?![a-zA-Z])' | head -1 || true)
+
+if [ -n "$W_MATCH" ] && [ -n "$H_MATCH" ]; then
+  echo "Error: both width ($W_MATCH) and height ($H_MATCH) found in folder name. Skipping." >&2
+  exit 1
+fi
+
+if [ -z "$W_MATCH" ] && [ -z "$H_MATCH" ]; then
+  echo "Error: no wNNN or hNNN pattern found in folder name '$DIRNAME'. Skipping." >&2
+  exit 1
+fi
+
+if [ -n "$W_MATCH" ]; then
+  SIZE="${W_MATCH#w}"
+  GEOMETRY="${SIZE}x"
+  echo "Resizing to width ${SIZE}px"
+else
+  SIZE="${H_MATCH#h}"
+  GEOMETRY="x${SIZE}"
+  echo "Resizing to height ${SIZE}px"
+fi
+
+OUTDIR="$FOLDER/resized"
+mkdir -p "$OUTDIR"
+
+COUNT=0
+shopt -s nullglob nocaseglob
+for IMG in "$FOLDER"/*.{jpg,jpeg,png,webp,tiff,tif,bmp}; do
+  [ -f "$IMG" ] || continue
+  BASENAME="$(basename "$IMG")"
+  echo "  $BASENAME"
+  convert "$IMG" -resize "$GEOMETRY" "$OUTDIR/$BASENAME"
+  touch -r "$IMG" "$OUTDIR/$BASENAME"
+  COUNT=$((COUNT + 1))
+done
+shopt -u nullglob nocaseglob
+
+if [ "$COUNT" -eq 0 ]; then
+  echo "No images found in '$FOLDER'"
+  rmdir "$OUTDIR" 2>/dev/null || true
+  exit 0
+fi
+
+echo "Done: $COUNT image(s) resized → $OUTDIR"

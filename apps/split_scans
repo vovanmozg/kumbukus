@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# requirement: vendor/imagemagick
+#
+# Split every *.png in DIR into top/ and bottom/ halves — e.g. two documents
+# scanned together on one sheet. Output goes to DIR/top/ and DIR/bottom/.
+# Usage: split_scans [DIR]   (DIR defaults to cwd)
+
+DIR="${1:-.}"
+TOP="$DIR/top"
+BOT="$DIR/bottom"
+mkdir -p "$TOP" "$BOT"
+
+for FILE in "$DIR"/*.png; do
+  [ -f "$FILE" ] || continue
+  NAME=$(basename "$FILE")
+  H=$(identify -format '%h' "$FILE")
+  HALF=$((H / 2))
+
+  convert "$FILE" -crop "x${HALF}+0+0" +repage "$TOP/$NAME"
+  convert "$FILE" -crop "x${HALF}+0+${HALF}" +repage "$BOT/$NAME"
+  echo "$TOP/$NAME"
+  echo "$BOT/$NAME"
+done
