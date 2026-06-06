@@ -1,5 +1,6 @@
 # mozjpeg is not in apt — build from source. Installs to /opt/mozjpeg
 # (binaries in /opt/mozjpeg/bin, e.g. cjpeg/djpeg).
+# check: test -x /opt/mozjpeg/bin/cjpeg
 sudo apt-get update
 sudo apt-get install cmake autoconf automake libtool nasm make pkg-config git libpng-dev
 git clone https://github.com/mozilla/mozjpeg.git

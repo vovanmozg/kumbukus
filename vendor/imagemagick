@@ -1,1 +1,2 @@
+# check: command -v identify
 sudo apt install imagemagick -y
