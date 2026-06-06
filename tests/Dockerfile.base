@@ -1,5 +1,13 @@
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update \
- && apt-get install -y --no-install-recommends sudo git ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+# Make the image behave like a normal interactive Ubuntu machine, which is what
+# the vendor recipes assume:
+#   - Assume-Yes: some recipes run `apt-get install` WITHOUT `-y`; a real user
+#     answers the [Y/n] prompt, so we auto-confirm instead of aborting on EOF.
+#   - Keep apt package lists (do NOT rm /var/lib/apt/lists): some recipes run
+#     `apt install X` WITHOUT `apt-get update`, relying on lists already existing.
+# Clearing lists or requiring interaction would make the environment unrealistic
+# and break those recipes ("Unable to locate package" / "Abort.").
+RUN echo 'APT::Get::Assume-Yes "true";' > /etc/apt/apt.conf.d/90kumbukus-assume-yes \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends sudo git ca-certificates
