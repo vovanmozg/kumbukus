@@ -26,7 +26,11 @@ declare -a passed=() failed=()
 for app in "${apps[@]}"; do
   echo "==> Testing install: $app"
   df="$here/.generated/Dockerfile.$app"
-  gen_dockerfile "$app" "$repo" > "$df"
+  if ! gen_dockerfile "$app" "$repo" > "$df"; then
+    echo "  generation failed for $app" >&2
+    failed+=("$app")
+    continue
+  fi
   if docker build -t "kumbukus-test-$app" -f "$df" "$repo"; then
     passed+=("$app")
   else
@@ -36,7 +40,7 @@ done
 
 echo
 echo "==== Summary ===="
-for a in "${passed[@]:-}"; do [ -n "$a" ] && echo "PASS  $a"; done
-for a in "${failed[@]:-}"; do [ -n "$a" ] && echo "FAIL  $a"; done
+for a in "${passed[@]}"; do echo "PASS  $a"; done
+for a in "${failed[@]}"; do echo "FAIL  $a"; done
 
 [ ${#failed[@]} -eq 0 ]
