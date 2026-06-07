@@ -4,10 +4,88 @@ set -e
 
 # Default repository URL
 DEFAULT_REPO_URL="https://github.com/vovanmozg/kumbukus"
-REPO_URL=${1:-$DEFAULT_REPO_URL}
+
+usage() {
+    cat <<EOF
+Usage: installapps [--with-deps] [REPO_URL]
+
+  --with-deps   Also install each selected script's dependencies (the vendor
+                recipes named in its '# requirement: vendor/<dep>' headers),
+                skipping tools that are already present. A script whose
+                dependency fails to install is skipped (not copied).
+  REPO_URL      Git repo to install from (default: $DEFAULT_REPO_URL)
+
+Without --with-deps, only the selected scripts are copied to ~/bin.
+EOF
+}
+
+# Parse args: --with-deps anywhere; first non-flag arg is REPO_URL.
+WITH_DEPS=0
+REPO_URL=""
+for arg in "$@"; do
+    case "$arg" in
+        --with-deps) WITH_DEPS=1 ;;
+        -h|--help) usage; exit 0 ;;
+        -*) echo "Unknown option: $arg" >&2; usage; exit 1 ;;
+        *) [ -z "$REPO_URL" ] && REPO_URL="$arg" ;;
+    esac
+done
+REPO_URL="${REPO_URL:-$DEFAULT_REPO_URL}"
 
 TARGET_DIR="/tmp/kumbukus_$(date +%s)"
 INSTALL_DIR="$HOME/bin"
+
+# Print vendor dependency names declared by a script (one per line, in order).
+deps_of() {
+    grep -E '^# requirement:[[:space:]]*vendor/' "$1" 2>/dev/null \
+        | sed -E 's|^# requirement:[[:space:]]*vendor/||' \
+        | awk '{print $1}'
+}
+
+# Print the presence-check command for a vendor recipe file:
+# the '# check:' directive if present, else 'command -v <basename>'.
+check_cmd_for() {
+    local f="$1" line
+    line="$(grep -E '^# check:' "$f" 2>/dev/null | head -1 | sed -E 's|^# check:[[:space:]]*||')"
+    if [ -n "$line" ]; then
+        printf '%s\n' "$line"
+    else
+        printf 'command -v %s\n' "$(basename "$f")"
+    fi
+}
+
+# Install every dependency of a script. Returns non-zero if any dep fails.
+# Args: <script_file> <clone_dir>
+install_deps() {
+    local script_file="$1" clone="$2"
+    local dep vfile check seen=" "
+    while IFS= read -r dep; do
+        [ -z "$dep" ] && continue
+        case "$seen" in *" $dep "*) continue ;; esac   # dedup
+        seen="$seen$dep "
+        vfile="$clone/vendor/$dep"
+        if [ ! -f "$vfile" ]; then
+            echo "    $dep: no recipe at vendor/$dep" >&2
+            return 1
+        fi
+        check="$(check_cmd_for "$vfile")"
+        if bash -c "$check" >/dev/null 2>&1; then
+            echo "    $dep: already present, skipping"
+            continue
+        fi
+        echo "    $dep: installing (vendor/$dep)..."
+        if ! bash "$vfile"; then
+            echo "    $dep: FAILED (recipe error)" >&2
+            return 1
+        fi
+        if ! bash -c "$check" >/dev/null 2>&1; then
+            echo "    $dep: FAILED (not present after install)" >&2
+            return 1
+        fi
+        echo "    $dep: ok"
+    done < <(deps_of "$script_file")
+    return 0
+}
 
 function select_scripts() {
     echo "Fetching script list..."
@@ -46,18 +124,37 @@ fi
 
 select_scripts
 
+installed=()
+skipped=()
 for script in "${SELECTED[@]}"; do
     SCRIPT_PATH="$TARGET_DIR/apps/$script"
-    if [ -f "$SCRIPT_PATH" ]; then
-        echo "Installing $script to $INSTALL_DIR..."
-        cp "$SCRIPT_PATH" "$INSTALL_DIR/"
-        chmod +x "$INSTALL_DIR/$script"
-    else
+    if [ ! -f "$SCRIPT_PATH" ]; then
         echo "Error: $script not found!"
+        skipped+=("$script (not found)")
+        continue
     fi
+    if [ "$WITH_DEPS" -eq 1 ]; then
+        echo "==> $script: installing dependencies"
+        if ! install_deps "$SCRIPT_PATH" "$TARGET_DIR"; then
+            echo "==> $script: SKIPPED (a dependency failed)"
+            skipped+=("$script (dependency failed)")
+            continue
+        fi
+    fi
+    echo "Installing $script to $INSTALL_DIR..."
+    cp "$SCRIPT_PATH" "$INSTALL_DIR/"
+    chmod +x "$INSTALL_DIR/$script"
+    installed+=("$script")
 done
 
 echo "Cleaning up..."
 rm -rf "$TARGET_DIR"
 
+echo ""
+echo "==== Summary ===="
+echo "Installed: ${installed[*]:-(none)}"
+if [ "${#skipped[@]}" -gt 0 ]; then
+    echo "Skipped:"
+    for s in "${skipped[@]}"; do echo "  - $s"; done
+fi
 echo "Installation complete!"
