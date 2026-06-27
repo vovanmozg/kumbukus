@@ -47,17 +47,31 @@
         {
           "type": "command",
           "label": "Make PDF",
-          "command_line": "makepdf.sh %f"
+          "command_line": "makepdf.sh %f",
+          "mimetypes": [
+            "image/*",
+            "inode/directory"
+          ],
+          "filetypes": [
+            "file",
+            "directory"
+          ]
         },
         {
           "type": "command",
           "label": "PDF compress",
-          "command_line": " compresspdf.sh %f"
+          "command_line": "compresspdf.sh %f",
+          "mimetypes": [
+            "application/pdf"
+          ]
         },
         {
           "type": "command",
           "label": "PDF ultra compress",
-          "command_line": " compresspdf.sh %f --width=1000"
+          "command_line": "compresspdf.sh %f --width=1000",
+          "mimetypes": [
+            "application/pdf"
+          ]
         },
         {
           "type": "command",
