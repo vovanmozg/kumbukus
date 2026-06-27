@@ -1,98 +1,102 @@
 #!/bin/bash
 
+# requirement: vendor/poppler-utils
 # requirement: vendor/imagemagick
+# requirement: vendor/mozjpeg
+# requirement: vendor/pngquant
+# requirement: vendor/oxipng
+#
+# Compress a PDF by re-optimizing its page images with local tools (no cloud).
+#   compresspdf.sh <file.pdf> [--width=<px>]
+# Output goes to <dir>/optimized/<name>.pdf; the original is untouched.
+# Page images are optimized like tinifyimage.sh --offline:
+#   jpeg -> mozjpeg (q75); png -> pngquant if losslessly quantizable, then oxipng.
+# With --width=N each page image is first downscaled to N px wide (shrink only).
 
-source ~/.env
+set -euo pipefail
 
-# Проверка на наличие аргумента (имя файла PDF)
+JPEG_QUALITY=75
+OXIPNG_LEVEL=4
+MOZJPEG_BIN=/opt/mozjpeg/bin
+
 if [ "$#" -lt 1 ]; then
-    echo "Using: $0 file_name.pdf [--compress=<value>] [--width=<value>]"
+    echo "Using: $0 <file.pdf> [--width=<px>]"
     exit 1
 fi
 
-SOURCE_PDF="$1"
-COMPRESS_LEVEL= # По умолчанию нет значения
-WIDTH=
-
-# Чтение дополнительных параметров
-for arg in "$@"
-do
-    case $arg in
-        --compress=*)
-            COMPRESS_LEVEL="${arg#*=}"
-            shift
-            ;;
-        --width=*)
-            WIDTH="${arg#*=}"
-            shift
-            ;;
-        *)
-            ;;
+SOURCE_PDF=""
+WIDTH=""
+for arg in "$@"; do
+    case "$arg" in
+        --width=*) WIDTH="${arg#*=}" ;;
+        -*)        echo "Unknown option: $arg" >&2; exit 1 ;;
+        *)         SOURCE_PDF="$arg" ;;
     esac
 done
 
-#OPTIMIZED_FILE="${SOURCE_PDF%.pdf}optimized.pdf"
-OPTIMIZED_DIR=$(dirname "$SOURCE_PDF")/optimized
-mkdir "${OPTIMIZED_DIR}"
-OPTIMIZED_FILE="$OPTIMIZED_DIR/$(basename "${SOURCE_PDF}")"
-
-touch "${OPTIMIZED_FILE}.tmp"
-
-# Получение CRC32 хэша от имени файла
-
-FILE_NAME=$(basename "$SOURCE_PDF" .pdf)
-FILE_HASH=$(echo -n "$FILE_NAME" | cksum | awk '{print $1}')
-echo "для ${FILE_NAME} хэш будет ${FILE_HASH}" >> $LOG_FILE
-TEMP_DIR="/tmp/pdfcompress/$(date +%s)_${FILE_HASH}"
-LOG_FILE="${TEMP_DIR}/log.txt"
-
-mkdir -p "$TEMP_DIR"
-
-# Извлечение изображений из PDF
-echo "Извлечение изображений..." >> $LOG_FILE
-pdfimages -all "$SOURCE_PDF" "$TEMP_DIR/img"
-
-# Проверка на существование извлечённых изображений
-if [ ! "$(ls -A $TEMP_DIR | grep img)" ]; then
-    echo "Изображения не найдены в PDF." >> $LOG_FILE
-    rm -rf "$TEMP_DIR"
-    rm "${OPTIMIZED_FILE}.tmp"
+if [ -z "$SOURCE_PDF" ] || [ ! -f "$SOURCE_PDF" ]; then
+    echo "No such file: $SOURCE_PDF" >&2
     exit 1
 fi
 
-# Оптимизация изображений
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+# Extract page images.
+pdfimages -all "$SOURCE_PDF" "$TEMP_DIR/img"
+if ! ls "$TEMP_DIR"/img* >/dev/null 2>&1; then
+    echo "No images found in $SOURCE_PDF"
+    exit 0
+fi
+
+# Optimize one image in place, mirroring tinifyimage.sh --offline.
+optimize_image() {
+    local img="$1" fmt m n z
+    m=$(file -b --mime-type "$img" 2>/dev/null || true)
+    case "$m" in
+        image/jpeg) fmt=jpeg ;;
+        image/png)  fmt=png ;;
+        *)
+            case "${img,,}" in
+                *.jpg|*.jpeg) fmt=jpeg ;;
+                *.png)        fmt=png ;;
+                *)            fmt="" ;;
+            esac
+            ;;
+    esac
+
+    case "$fmt" in
+        jpeg)
+            "$MOZJPEG_BIN/djpeg" "$img" \
+                | "$MOZJPEG_BIN/cjpeg" -quality "$JPEG_QUALITY" -quant-table 3 -progressive -optimize -outfile "$img.tmp"
+            mv -f "$img.tmp" "$img"
+            ;;
+        png)
+            read -r n z < <(identify -format '%k %z\n' "$img" 2>/dev/null || echo "999999 16")
+            if [ "${n:-999999}" -le 256 ] 2>/dev/null && [ "${z:-16}" -le 8 ] 2>/dev/null; then
+                if pngquant 256 --skip-if-larger --force --output "$img.q" "$img" 2>/dev/null; then
+                    mv -f "$img.q" "$img"
+                fi
+            fi
+            oxipng -o "$OXIPNG_LEVEL" --strip safe --alpha "$img" >/dev/null 2>&1 || true
+            ;;
+        *)
+            : # leave non jpg/png images unchanged
+            ;;
+    esac
+}
+
 for img in "$TEMP_DIR"/img*; do
-    OUTPUT_IMG="$img"
-    
-    # Если передан параметр compress, сжимаем через jpegoptim
-    if [ ! -z "$COMPRESS_LEVEL" ]; then
-        jpegoptim --max="$COMPRESS_LEVEL" --strip-all --preserve-perms "$img"
+    [ -f "$img" ] || continue
+    if [ -n "$WIDTH" ]; then
+        mogrify -resize "${WIDTH}x>" "$img"
     fi
-
-    # Если передан параметр width, изменяем размер
-    if [ ! -z "$WIDTH" ]; then
-        mogrify -resize "${WIDTH}x" "$img"
-    fi
-
-    # Сжатие через tinify
-    echo "Сжатие через tinify..." >> $LOG_FILE
-    response=$(curl --user api:$TINYPNG_API_KEY --dump-header /dev/stdout --data-binary @"$img" https://api.tinify.com/shrink)
-
-    location_url=$(echo "$response" | grep -i Location: | awk '{print $2}' | tr -d '\r')
-
-    if [ ! -z "$location_url" ]; then
-        curl -L "$location_url" --output "$OUTPUT_IMG" >> $LOG_FILE
-    else
-        echo "Не удалось сжать изображение $img" >> $LOG_FILE
-    fi
+    optimize_image "$img"
 done
 
-# Создание нового PDF из сжатых изображений
-echo "Создание нового PDF..." >> $LOG_FILE
-convert "$TEMP_DIR"/img* "${OPTIMIZED_FILE}"
+OPTIMIZED_DIR=$(dirname "$SOURCE_PDF")/optimized
+mkdir -p "$OPTIMIZED_DIR"
+OPTIMIZED_FILE="$OPTIMIZED_DIR/$(basename "$SOURCE_PDF")"
 
-# Удаление временных файлов
-rm -rf "$TEMP_DIR"
-rm "${OPTIMIZED_FILE}.tmp"
-
-echo "Сжатие PDF завершено. Файл создан: ${SOURCE_PDF%.pdf}_optimized.pdf" >> $LOG_FILE
+convert "$TEMP_DIR"/img* "$OPTIMIZED_FILE"
+echo "Compression finished: $OPTIMIZED_FILE"
