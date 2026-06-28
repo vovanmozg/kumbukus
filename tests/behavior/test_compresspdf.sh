@@ -8,6 +8,7 @@ repo="$(cd "$here/../.." && pwd)"
 source "$repo/tests/selftest/assert.sh"
 
 COMPRESSPDF="$repo/apps/compresspdf.sh"
+export PATH="$repo/apps:$PATH"   # so compresspdf.sh finds optimizeimage.sh
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
