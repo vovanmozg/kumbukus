@@ -32,8 +32,8 @@ offline **и** online Tinify), с простым интерфейсом `SRC DST
   optimizeimage.
 - **Декларируем только прямые vendor-зависимости.** optimizeimage несёт требования
   mozjpeg/pngquant/oxipng/imagemagick/curl/exiftool; compresspdf держит свои прямые
-  (poppler-utils, imagemagick); у tinifyimage своего vendor-инструмента нет. Зависимость от
-  соседнего `optimizeimage` фиксируется **обычным комментарием**, а не строкой `# requirement:`.
+  (poppler-utils, imagemagick); у tinifyimage зависит от
+  соседнего `optimizeimage`, но пока не поддерживается тулингом.
 - **Тулинг установки откладываем.** `installapps`/`requirements.sh` понимают только
   `# requirement: vendor/<dep>`; научить их ставить соседние скрипты — отдельный тикет позже.
   Пока установка обёрток требует ручной установки `optimizeimage.sh` — это задокументированное
@@ -56,9 +56,11 @@ offline **и** online Tinify), с простым интерфейсом `SRC DST
 
 ## 1. `apps/optimizeimage.sh` (новый)
 
-**Интерфейс:** `optimizeimage.sh [--online|--offline|--local] [--no-metadata] [-q N] [-h|--help] SRC DST`
-- Режим по умолчанию `--offline`. `--local` — принимаемый алиас `--offline` (сохранён из
-  текущего `tinifyimage.sh`). `-h`/`--help` печатает usage и выходит 0.
+**Интерфейс:** `optimizeimage.sh [--online|--offline] [--no-metadata] [-q N] [-h|--help] SRC DST`
+- Режим по умолчанию `--offline`. `-h`/`--help` печатает usage и выходит 0.
+- **Алиас `--local` выкидывается** (намеренное упрощение): это мёртвый синоним `--offline`,
+  нигде не используемый. Это второе намеренное изменение к текущему поведению (помимо багфикса
+  `\n`), но безопасное — ни меню, ни скрипты, ни доки `--local` не вызывают.
 - **Неподдержанный тип** (offline, вход не jpeg и не png): печатает сообщение и выходит 1 —
   поведение текущего `tinifyimage.sh`, сохраняется как есть. Почему это корректно и для
   `compresspdf.sh` — см. «Сохранность поведения».
@@ -95,8 +97,10 @@ offline **и** online Tinify), с простым интерфейсом `SRC DST
 
 **Багфиксы при копировании:**
 - `identify -format '%k %z\n'` (добавить перевод строки, чтобы `read` не падал на EOF — баг,
-  который сейчас несёт `tinifyimage.sh`). Это **единственное** намеренное изменение поведения;
-  всё остальное сохраняется эквивалентно байт-в-байт.
+  который сейчас несёт `tinifyimage.sh`).
+
+**Намеренные изменения к текущему поведению — их ровно два, остальное сохраняется
+эквивалентно байт-в-байт:** (1) багфикс `\n` выше; (2) удаление мёртвого алиаса `--local`.
 
 **Заголовки требований:**
 ```
@@ -115,9 +119,9 @@ offline **и** online Tinify), с простым интерфейсом `SRC DST
 | Текущий элемент (tinifyimage.sh) | Судьба в optimizeimage.sh |
 |---|---|
 | Константы `JPEG_QUALITY/OXIPNG_LEVEL/MOZJPEG_BIN` (24–26) | копируются дословно |
-| `usage()` (28–40) | копируется, текст обновлён под `SRC DST`/`--local`/`-h` |
+| `usage()` (28–40) | копируется, текст обновлён под `SRC DST`/`-h` |
 | Разбор флагов `--online` (46–48) | копируется |
-| `--offline` / `--local` (49) | копируется (алиас сохранён) |
+| `--offline` / `--local` (49) | `--offline` копируется; **`--local` выкинут** (мёртвый алиас) |
 | `--no-metadata` (50) | копируется |
 | `-q\|--quality N` (51) | копируется |
 | `-h\|--help` → usage exit 0 (52) | копируется |
@@ -143,14 +147,14 @@ offline **и** online Tinify), с простым интерфейсом `SRC DST
 | отчёт `-X%` через awk (185–188) | копируется, цель → DST |
 | диспетч `MODE online/offline` (191–195) | копируется |
 
-Итог: единственные изменения — две строки про аргумент/DST и багфикс `\n`. Логика не теряется.
+Итог: изменения — две строки про аргумент/DST, багфикс `\n` и удаление мёртвого алиаса
+`--local`. Остальная логика не теряется.
 
 ## 2. `apps/tinifyimage.sh` (становится тонкой обёрткой)
 
-- Сохраняет **точно тот же** CLI, что и сейчас — `[--online|--offline|--local] [--no-metadata]
-  [-q N] [-h|--help] FILE`, включая алиас `--local` и `-h`/usage — чтобы пункты меню
-  (`tinifyimage.sh %f`, `tinifyimage.sh %f --no-metadata`) и любое использование из терминала
-  работали без изменений.
+- Сохраняет тот же CLI, что и сейчас, **минус мёртвый `--local`** — `[--online|--offline]
+  [--no-metadata] [-q N] [-h|--help] FILE` — чтобы пункты меню (`tinifyimage.sh %f`,
+  `tinifyimage.sh %f --no-metadata`) и любое использование из терминала работали без изменений.
 - Считает `DST="$(dirname SRC)/optimized/$(basename SRC)"`, делает `mkdir -p` этой папки и
   делегирует, пробрасывая все свои флаги: `optimizeimage <те же флаги> "$SRC" "$DST"`.
 - Удаляет весь код оптимизации/online (теперь в optimizeimage): `require()`, `detect_format`,
@@ -179,11 +183,12 @@ offline **и** online Tinify), с простым интерфейсом `SRC DST
 
 ## Сохранность поведения (проверено по текущим скриптам)
 
-Всё текущее поведение сохраняется; единственное намеренное изменение — багфикс `identify`-`\n`.
+Всё текущее поведение сохраняется; намеренных изменений ровно два — багфикс `identify`-`\n` и
+удаление мёртвого алиаса `--local`.
 
-- **CLI tinifyimage** — `--online`, `--offline`, алиас `--local`, `--no-metadata`,
-  `-q/--quality N`, `-h/--help`/usage, ошибка+usage на unknown `-*`, exit 1 на отсутствующий/
-  пустой файл — всё пробрасывается в optimizeimage. Меню не затронуто.
+- **CLI tinifyimage** — `--online`, `--offline`, `--no-metadata`, `-q/--quality N`,
+  `-h/--help`/usage, ошибка+usage на unknown `-*`, exit 1 на отсутствующий/пустой файл — всё
+  пробрасывается в optimizeimage (кроме выкинутого `--local`). Меню не затронуто.
 - **Метаданные** — offline jpeg хранит Orientation при `--no-metadata` и все теги иначе; offline
   png при `--no-metadata` не хранит ничего; online запекает `Orientation=Horizontal`. Копируется
   дословно.
