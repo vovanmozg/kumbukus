@@ -54,8 +54,12 @@ thin callers. The duplicated optimization code disappears.
 
 Built by copying `tinifyimage.sh`'s logic, fixing bugs, and changing the interface.
 
-**Interface:** `optimizeimage.sh [--online|--offline] [--no-metadata] [-q N] SRC DST`
-- Default mode `--offline`.
+**Interface:** `optimizeimage.sh [--online|--offline|--local] [--no-metadata] [-q N] [-h|--help] SRC DST`
+- Default mode `--offline`. `--local` is an accepted alias of `--offline` (preserved from
+  today's `tinifyimage.sh`). `-h`/`--help` prints usage and exits 0.
+- **Unsupported type** (offline, input neither jpeg nor png): prints a message and exits 1 —
+  today's `tinifyimage.sh` behavior, kept as-is. See "Behavior preservation" below for why this
+  is faithful for `compresspdf.sh` too.
 - Writes the optimized image to **DST** (not `optimized/<basename>`). The directory of DST
   must already exist — optimizeimage does not create directories.
 - **In-place supported:** `SRC` may equal `DST`. Implementation writes to a temp file
@@ -73,12 +77,22 @@ Built by copying `tinifyimage.sh`'s logic, fixing bugs, and changing the interfa
   writing to DST.
 - **Constants:** `JPEG_QUALITY=75`, `OXIPNG_LEVEL=4`, `MOZJPEG_BIN=/opt/mozjpeg/bin`.
 - **`require()`** tool checks retained.
-- **Report:** prints `Compression finished … (o -> n bytes, -X%)` to stdout (callers may
-  redirect it).
+- **Report:** prints the same messages today's `tinifyimage.sh` prints — offline
+  `Compression finished (local): <DST>  (o -> n bytes, -X%)`, online
+  `Compression finished (online): <DST>` — so wrapper stdout is unchanged. Callers may redirect.
+
+**Metadata semantics — copy verbatim from today's `tinifyimage.sh`, do not paraphrase:**
+- `--no-metadata` false: restore all tags from SRC onto DST (`exiftool -tagsfromfile SRC
+  -all:all DST`).
+- `--no-metadata` true: jpeg keeps **only** `Orientation`; png keeps **nothing**.
+- online mode: after download, strip all then restore from SRC and force
+  `Orientation=Horizontal` (Tinify bakes rotation into pixels) — exactly as the current
+  `compress_online` does.
 
 **Bugs fixed during the copy:**
 - `identify -format '%k %z\n'` (add the newline so `read` doesn't fail at EOF — the bug
-  `tinifyimage.sh` currently carries).
+  `tinifyimage.sh` currently carries). This is the only intentional behavior change; everything
+  else is preserved byte-for-byte in effect.
 
 **Requirement headers:**
 ```
@@ -92,10 +106,12 @@ Built by copying `tinifyimage.sh`'s logic, fixing bugs, and changing the interfa
 
 ### 2. `apps/tinifyimage.sh` (becomes a thin wrapper)
 
-- Keeps the same CLI it has today (`[--online|--offline] [--no-metadata] [-q N] FILE`) so the
-  Nautilus menu entries keep working unchanged.
+- Keeps the **exact** CLI it has today — `[--online|--offline|--local] [--no-metadata] [-q N]
+  [-h|--help] FILE`, including the `--local` alias and `-h`/usage — so the Nautilus menu entries
+  (`tinifyimage.sh %f`, `tinifyimage.sh %f --no-metadata`) and any terminal use keep working
+  unchanged.
 - Computes `DST="$(dirname SRC)/optimized/$(basename SRC)"`, `mkdir -p` that folder, and
-  delegates: `optimizeimage <same flags> "$SRC" "$DST"`.
+  delegates by forwarding all of its flags: `optimizeimage <same flags> "$SRC" "$DST"`.
 - Removes all optimization/online code (now in optimizeimage), `require()`, `detect_format`,
   `compress_local`, `compress_online`.
 - Direct vendor deps: none of its own; add a comment `# depends on: optimizeimage.sh` (not a
@@ -107,12 +123,38 @@ Built by copying `tinifyimage.sh`'s logic, fixing bugs, and changing the interfa
 - In the per-page loop: keep `mogrify -resize "${WIDTH}x>"` when `--width` is given, then call
   `optimizeimage --offline --no-metadata "$img" "$img" >/dev/null` (in-place; metadata is
   meaningless for intermediate page images; stdout suppressed to avoid a line per page).
+- jpg/png page failures abort under `set -euo pipefail` exactly as the current inline
+  `optimize_image()` does. See "Behavior preservation" for non-jpg/png pages.
 - Requirement headers keep only its direct tools:
   ```
   # requirement: vendor/poppler-utils
   # requirement: vendor/imagemagick
   ```
   plus a comment `# depends on: optimizeimage.sh`.
+
+## Behavior preservation (verified against the current scripts)
+
+Every current behavior is preserved; the only intentional change is the `identify` newline
+bugfix.
+
+- **tinifyimage CLI surface** — `--online`, `--offline`, `--local` alias, `--no-metadata`,
+  `-q/--quality N`, `-h/--help`/usage, error+usage on unknown `-*`, exit 1 on missing/empty
+  file — all forwarded to optimizeimage. Menu entries unaffected.
+- **Metadata** — offline jpeg keeps Orientation under `--no-metadata` and full tags otherwise;
+  offline png keeps nothing under `--no-metadata`; online bakes `Orientation=Horizontal`. Copied
+  verbatim (see metadata note above).
+- **Output messages** — `(local)`/`(online)` + `-X%` preserved.
+- **compresspdf on jpg/png PDFs** — identical output (optimizeimage runs the same
+  mozjpeg/pngquant/oxipng pipeline that compresspdf ran inline).
+- **compresspdf on non-jpg/png PDFs (CCITT/JBIG2/CMYK-as-ppm, etc.)** — *empirically, the
+  current script already fails* on these: `pdfimages -all` emits a non-jpg/png file (and a
+  `.params` sidecar), and the final `convert "$TEMP_DIR"/img* …` has no decode delegate for
+  CCITT/PARAMS, so it exits 1 with no usable output. The refactor reproduces a failing exit on
+  the same inputs (optimizeimage exits 1 on the unsupported page first). No working behavior is
+  lost. A `--skip-unsupported` pass-through was considered and **rejected**: it would not make
+  such PDFs succeed (the downstream `convert` still can't read CCITT), so it adds surface
+  without preserving or fixing anything. Genuinely supporting exotic page formats is a separate
+  future improvement, explicitly out of scope here.
 
 ## Error handling
 
@@ -143,11 +185,17 @@ imagemagick/mozjpeg/pngquant/oxipng/file):
 4. **in-place** (`SRC==DST`) → the file is optimized in place and remains valid.
 5. **SRC≠DST** → DST created in an existing directory, SRC untouched.
 6. **unsupported type** (e.g. a `.txt`) in offline mode → exit 1.
+7. **`--no-metadata` on a jpeg** → DST is valid and its `Orientation` tag is preserved while
+   other EXIF is dropped (guards the metadata nuance).
 
 Regression:
 - `tests/behavior/test_compresspdf.sh` continues to pass (now exercising optimizeimage via the
   per-page call) — including the jpeg/mozjpeg, png, `--width=600`, and no-Tinify-cloud checks.
-- A minimal `tinifyimage.sh` smoke check: running it on a generated jpeg produces
-  `optimized/<name>` — added to the optimizeimage test or a tiny `test_tinifyimage.sh`.
+- A minimal `test_tinifyimage.sh` smoke check: `tinifyimage.sh` (offline, default) on a
+  generated jpeg produces a valid `optimized/<name>` smaller than the source — confirming the
+  wrapper still works end-to-end.
+
+Not asserted (would be testing a pre-existing failure, not a regression): non-jpg/png PDFs
+continue to fail in `compresspdf` exactly as they do today; no test pretends they succeed.
 
 Online (Tinify) paths are not tested automatically (need a key and network).
