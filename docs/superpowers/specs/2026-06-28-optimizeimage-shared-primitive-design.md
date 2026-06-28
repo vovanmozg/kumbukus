@@ -1,149 +1,158 @@
-# Выделение оптимизации картинок в общий примитив `optimizeimage.sh`
+# Extract image optimization into a shared `optimizeimage.sh` primitive
 
-## Проблема
+## Problem
 
-Логика локальной оптимизации картинок (mozjpeg для jpeg; pngquant-если-без-потерь + oxipng для
-png) живёт в **двух** скриптах — `tinifyimage.sh` (`compress_local` + `detect_format`) и
-`compresspdf.sh` (`optimize_image`). Копии уже разошлись за одну сессию: `compresspdf.sh`
-починил баг `identify '%k %z'` (`read` падает на EOF), а `tinifyimage.sh` его всё ещё несёт.
-Классический дрейф из-за нарушения DRY, с латентным багом в одной из копий.
+The local image-optimization logic (mozjpeg for jpeg; pngquant-if-lossless + oxipng for png)
+lives in **two** scripts — `tinifyimage.sh` (`compress_local` + `detect_format`) and
+`compresspdf.sh` (`optimize_image`). The copies already diverged within one session:
+`compresspdf.sh` fixed an `identify '%k %z'` bug (`read` fails at EOF) that `tinifyimage.sh`
+still carries. Classic DRY drift, with a latent bug in one copy.
 
-## Цель и подход
+## Goal and approach
 
-Ввести третий скрипт `optimizeimage.sh`, который владеет всей логикой оптимизации (offline +
-online Tinify), с интерфейсом `SRC DST` и без знания про папку `optimized/`. `tinifyimage.sh` и
-`compresspdf.sh` становятся тонкими вызывающими; дублирующийся код оптимизации исчезает.
+Introduce a third script, `optimizeimage.sh`, that owns all the optimization logic (offline +
+online Tinify), with a plain `SRC DST` interface and no knowledge of the `optimized/` folder.
+`tinifyimage.sh` and `compresspdf.sh` become thin callers; the duplicated optimization code
+disappears.
 
-**`optimizeimage.sh` создаётся копированием `tinifyimage.sh`, а не переписыванием.** Авторитетный
-источник логики оптимизации/метаданных/online — сам файл `apps/tinifyimage.sh`; этот спек НЕ
-переописывает его внутренности, а фиксирует только дельту и решения. См. «Дельта».
+**`optimizeimage.sh` is created by copying `tinifyimage.sh`, not by rewriting it.** The
+authoritative source for the optimization / metadata / online logic is the file
+`apps/tinifyimage.sh` itself; this spec does NOT re-describe its internals — it records only the
+delta and the decisions. See "Delta".
 
-## Решения (из brainstorming)
+## Decisions (from brainstorming)
 
-- **optimizeimage владеет обоими режимами** — offline (mozjpeg/pngquant/oxipng) и online (Tinify
-  `--online`). У `tinifyimage.sh` своей логики оптимизации не остаётся.
-- **Ресайз остаётся в `compresspdf.sh`** — optimizeimage чистый примитив «оптимизируй картинку»,
-  про `--width` не знает. compresspdf сам делает `mogrify -resize`, потом зовёт optimizeimage.
-- **Только прямые vendor-зависимости.** optimizeimage несёт требования
-  mozjpeg/pngquant/oxipng/imagemagick/curl/exiftool; compresspdf — свои прямые (poppler-utils,
-  imagemagick); у tinifyimage своего vendor-инструмента нет. Зависимость от соседнего
-  `optimizeimage` фиксируется **обычным комментарием** `# depends on: optimizeimage.sh`, не
-  строкой `# requirement:`.
-- **Тулинг установки откладываем.** `installapps`/`requirements.sh` понимают только
-  `# requirement: vendor/<dep>`; установка соседних скриптов — отдельный тикет позже. Пока
-  установка обёрток требует ручной установки `optimizeimage.sh` — задокументированное
-  ограничение.
+- **optimizeimage owns both modes** — offline (mozjpeg/pngquant/oxipng) and online (Tinify
+  `--online`). `tinifyimage.sh` keeps no optimization logic of its own.
+- **Resize stays in `compresspdf.sh`** — optimizeimage is a pure "optimize this image" primitive
+  and knows nothing about `--width`. compresspdf does `mogrify -resize` itself, then calls
+  optimizeimage.
+- **Only direct vendor deps declared.** optimizeimage carries the
+  mozjpeg/pngquant/oxipng/imagemagick/curl/exiftool requirements; compresspdf keeps its direct
+  ones (poppler-utils, imagemagick); tinifyimage has no direct vendor tool of its own. The
+  dependency on the sibling `optimizeimage` is recorded as a **plain comment**
+  `# depends on: optimizeimage.sh`, not a `# requirement:` line.
+- **Defer installer tooling.** `installapps`/`requirements.sh` only understand
+  `# requirement: vendor/<dep>`; installing sibling scripts is a separate later ticket. For now,
+  installing the wrappers also requires installing `optimizeimage.sh` manually — a documented
+  limitation.
 
-## Источник правды
+## Source of truth
 
-Репозиторий `~/pro/kumbukus`. Новый `apps/optimizeimage.sh` → ставится в `~/bin`. Изменяются
-`apps/tinifyimage.sh`, `apps/compresspdf.sh`. Изменений в `config.json`/меню нет (меню зовёт
+`~/pro/kumbukus` repo. New `apps/optimizeimage.sh` → installs to `~/bin`. Modified:
+`apps/tinifyimage.sh`, `apps/compresspdf.sh`. No `config.json`/menu changes (the menu calls
 `tinifyimage.sh %f`, `tinifyimage.sh %f --no-metadata`, `compresspdf.sh %f`,
 `compresspdf.sh %f --width=1000`).
 
-## Карта компонентов
+## Component map
 
 ```
                     optimizeimage.sh        (offline local + online Tinify; SRC DST)
                    /                \
-   tinifyimage.sh (обёртка optimized/)   compresspdf.sh (pdfimages → resize → optimize → сборка)
+   tinifyimage.sh (optimized/ wrapper)   compresspdf.sh (pdfimages → resize → optimize → reassemble)
 ```
 
-## Дельта: `optimizeimage.sh` = копия `tinifyimage.sh` со следующими изменениями
+## Delta: `optimizeimage.sh` = a copy of `tinifyimage.sh` with these changes
 
-Берётся `apps/tinifyimage.sh` целиком (`compress_local`, `compress_online`, `restore_metadata`,
-`detect_format`, `require`, `usage`, разбор флагов, диспетч) **дословно**, и применяются ровно
-эти изменения:
+Take `apps/tinifyimage.sh` as a whole (`compress_local`, `compress_online`,
+`restore_metadata`, `detect_format`, `require`, `usage`, flag parsing, mode dispatch)
+**verbatim**, and apply exactly these changes:
 
-1. **Интерфейс `SRC DST`.** Вместо одного позиционного аргумента — два: исходный `SRC` и
-   выходной `DST`. Целевой файл записи — `DST` вместо `OPTIMIZED_DIR/basename`.
-2. **Убрать логику `optimized/`.** Удалить вычисление `OPTIMIZED_DIR`/`OPTIMIZED_FILE` и
-   `mkdir -p`. Каталог `DST` обязан существовать заранее (забота вызывающего); optimizeimage
-   каталоги не создаёт. Везде, где код писал в `OPTIMIZED_FILE`, теперь пишет в `DST` (включая
-   `${DST}.work.tmp` для атомарной замены — это даёт поддержку in-place, когда `SRC==DST`).
-3. **Багфикс** `identify -format '%k %z'` → `'%k %z\n'` (перевод строки, чтобы `read` не падал
-   на EOF).
-4. **Выкинуть мёртвый алиас `--local`** (был синонимом `--offline`, который и так дефолт; нигде
-   не используется).
-5. **usage** обновить под `SRC DST` и без `--local`.
-6. **Заголовки `# requirement:`** — оставить только инструменты оптимизации:
+1. **`SRC DST` interface.** Two positional arguments instead of one: input `SRC` and output
+   `DST`. The write target becomes `DST` instead of `OPTIMIZED_DIR/basename`.
+2. **Drop the `optimized/` logic.** Remove the `OPTIMIZED_DIR`/`OPTIMIZED_FILE` computation and
+   the `mkdir -p`. `DST`'s directory must already exist (the caller's job); optimizeimage does
+   not create directories. Everywhere the code wrote to `OPTIMIZED_FILE` it now writes to `DST`
+   (including `${DST}.work.tmp` for the atomic replace — which gives in-place support when
+   `SRC==DST`).
+3. **Bugfix** `identify -format '%k %z'` → `'%k %z\n'` (add the newline so `read` doesn't fail
+   at EOF).
+4. **Drop the dead `--local` alias** (it was a synonym for `--offline`, which is already the
+   default; used nowhere).
+5. **Remove the two vestigial files in `compress_online`** — `METADATA_FILE` (written via
+   `exiftool -j SRC`, then deleted, but never read; the actual restore uses
+   `-tagsfromfile SRC`) and `OPTIMIZED_FILE_PROGRESS` (`touch`ed then `rm`ed, never read).
+   Delete both their create and remove lines. Verified write-only, so this changes no behavior.
+6. **usage** updated for `SRC DST` and without `--local`.
+7. **`# requirement:` headers** — keep only the optimization tools:
    `curl, exiftool, mozjpeg, pngquant, oxipng, imagemagick`.
 
-Итоговый интерфейс: `optimizeimage.sh [--online|--offline] [--no-metadata] [-q N] [-h|--help]
-SRC DST`. Режим по умолчанию `--offline`.
+Resulting interface: `optimizeimage.sh [--online|--offline] [--no-metadata] [-q N] [-h|--help]
+SRC DST`. Default mode `--offline`.
 
-**Важно — копировать дословно, НЕ «прибираясь»:** вся семантика метаданных (offline jpeg при
-`--no-metadata` хранит только `Orientation`; png — ничего; online принудительно
-`Orientation=Horizontal`), сообщения вывода (`(local)`/`(online)` + `-X%`), `require()`-проверки
-и **рудименты** (`METADATA_FILE`, `OPTIMIZED_FILE_PROGRESS` — создаются/удаляются, но для
-восстановления не используются) переносятся как есть. «Улучшение» этих кусков изменило бы
-поведение и здесь запрещено. Единственные намеренные изменения поведения — пункты 3 и 4 выше.
+**Intentional behavior changes are exactly these four — copy everything else verbatim, do NOT
+otherwise "tidy":** (3) the `\n` bugfix, (4) dropping `--local`, and (5) removing the two
+vestigial files. Every other piece — the full metadata semantics (offline jpeg keeps only
+`Orientation` under `--no-metadata`; png keeps nothing; online forces `Orientation=Horizontal`),
+the output messages (`(local)`/`(online)` + `-X%`), and the `require()` checks — is carried over
+unchanged. Items 1, 2, 6, 7 are interface/packaging mechanics, not optimization-behavior changes.
 
-## `tinifyimage.sh` → тонкая обёртка
+## `tinifyimage.sh` → thin wrapper
 
-- Сохраняет тот же CLI (минус `--local`): `[--online|--offline] [--no-metadata] [-q N]
-  [-h|--help] FILE`. Меню не затронуто.
-- Считает `DST="$(dirname SRC)/optimized/$(basename SRC)"`, `mkdir -p` папки, делегирует с
-  пробросом всех флагов: `optimizeimage <флаги> "$SRC" "$DST"`.
-- Удаляет весь перенесённый код (`compress_local`, `compress_online`, `restore_metadata`,
+- Keeps the same CLI (minus `--local`): `[--online|--offline] [--no-metadata] [-q N] [-h|--help]
+  FILE`. Menu unaffected.
+- Computes `DST="$(dirname SRC)/optimized/$(basename SRC)"`, `mkdir -p` the folder, delegates
+  forwarding all flags: `optimizeimage <flags> "$SRC" "$DST"`.
+- Removes all the moved code (`compress_local`, `compress_online`, `restore_metadata`,
   `detect_format`, `require`).
-- Комментарий `# depends on: optimizeimage.sh`.
+- Comment `# depends on: optimizeimage.sh`.
 
-## `compresspdf.sh` → убирает inline-оптимизатор
+## `compresspdf.sh` → drops the inline optimizer
 
-- Удаляет функцию `optimize_image()`.
-- В цикле по страницам: сохраняет `mogrify -resize "${WIDTH}x>"` при `--width`, затем зовёт
-  `optimizeimage --offline --no-metadata "$img" "$img" >/dev/null` (in-place; метаданные для
-  промежуточных картинок не нужны; stdout подавлен).
-- **Не трогаются:** разбор `--width`, `-*`→exit 1, «No such file»→exit 1, `pdfimages -all`,
-  «No images found»→exit 0, `mkdir -p optimized`, `convert "$TEMP_DIR"/img*` сборка, сообщение
-  «Compression finished: <pdf>».
-- `# requirement:` — только `poppler-utils`, `imagemagick`; комментарий
+- Removes the `optimize_image()` function.
+- In the per-page loop: keep `mogrify -resize "${WIDTH}x>"` when `--width` is given, then call
+  `optimizeimage --offline --no-metadata "$img" "$img" >/dev/null` (in-place; metadata is
+  meaningless for intermediate page images; stdout suppressed).
+- **Untouched:** `--width` parsing, `-*`→exit 1, "No such file"→exit 1, `pdfimages -all`,
+  "No images found"→exit 0, `mkdir -p optimized`, `convert "$TEMP_DIR"/img*` reassembly, the
+  "Compression finished: <pdf>" message.
+- `# requirement:` — only `poppler-utils`, `imagemagick`; comment
   `# depends on: optimizeimage.sh`.
 
-## Сохранность поведения (проверено по текущим скриптам)
+## Behavior preservation (verified against the current scripts)
 
-- **jpg/png PDF в compresspdf** — идентичный результат (та же связка mozjpeg/pngquant/oxipng,
-  теперь через optimizeimage).
-- **не-jpg/png PDF (CCITT/JBIG2/CMYK-как-ppm)** — *эмпирически текущий скрипт уже падает*:
-  `pdfimages -all` выдаёт файл не-jpg/png (+ сайдкар `.params`), и финальный `convert` без
-  декодера для CCITT/PARAMS выходит 1 без результата. Рефактор воспроизводит ненулевой выход на
-  тех же входах (optimizeimage выходит 1 на неподдержанной странице раньше). Рабочая
-  функциональность не теряется. Флаг `--skip-unsupported` рассматривался и **отклонён**: он не
-  заставит такие PDF собраться (downstream `convert` всё равно не читает CCITT). Поддержка
-  экзотических форматов — отдельное будущее улучшение, вне рамок.
+- **jpg/png PDFs in compresspdf** — identical output (the same mozjpeg/pngquant/oxipng pipeline,
+  now via optimizeimage).
+- **non-jpg/png PDFs (CCITT/JBIG2/CMYK-as-ppm)** — *the current script already fails*
+  empirically: `pdfimages -all` emits a non-jpg/png file (+ a `.params` sidecar), and the final
+  `convert` has no decode delegate for CCITT/PARAMS, exiting 1 with no output. The refactor
+  reproduces a non-zero exit on the same inputs (optimizeimage exits 1 on the unsupported page
+  first). No working behavior is lost. A `--skip-unsupported` flag was considered and
+  **rejected**: it would not make such PDFs succeed (downstream `convert` still can't read
+  CCITT). Supporting exotic page formats is a separate future improvement, out of scope.
 
-## Обработка ошибок
+## Error handling
 
-- optimizeimage: SRC существует и файл; DST задан; unknown-опция → usage + exit 1; неподдержанный
-  тип в offline → сообщение + exit 1 (как сейчас).
-- Обёртки: если `optimizeimage` не установлен — «command not found» (exit 127). Дружелюбный guard
-  не добавляем (установка отложена); ограничение задокументировано здесь.
+- optimizeimage: SRC exists and is a file; DST given; unknown option → usage + exit 1;
+  unsupported type in offline → message + exit 1 (as today).
+- Wrappers: if `optimizeimage` is not installed → "command not found" (exit 127). No friendlier
+  guard is added (installer support deferred); the limitation is documented here.
 
-## Вне рамок (YAGNI / отложено)
+## Out of scope (YAGNI / deferred)
 
-- Поддержка sibling-зависимостей в `installapps`/`requirements.sh` — отдельный тикет.
-- `--width`/ресайз в optimizeimage.
-- Online in-place (`SRC==DST` c `--online`).
-- Переименование вокруг похожего `optimizeimagejpegoptim.sh` (оставляем как есть).
+- Sibling-dependency support in `installapps`/`requirements.sh` — separate ticket.
+- `--width`/resize in optimizeimage.
+- Online in-place (`SRC==DST` with `--online`).
+- Renaming around the similarly-named `optimizeimagejpegoptim.sh` (left as is).
 
-## Тестирование
+## Testing
 
-Новый `tests/behavior/test_optimizeimage.sh` (через `tests/selftest/assert.sh`; нужны
+New `tests/behavior/test_optimizeimage.sh` (via `tests/selftest/assert.sh`; needs
 imagemagick/mozjpeg/pngquant/oxipng/file):
 
-1. **offline jpeg** → DST меньше SRC и валидный JPEG.
-2. **offline png-палитра** (≤256 цветов, 8 бит) → DST валидный PNG, не больше SRC.
-3. **offline png-фото** (>256 цветов) → DST валидный PNG (lossless-путь без ошибок).
-4. **in-place** (`SRC==DST`) → файл оптимизирован на месте, валиден.
-5. **SRC≠DST** → DST создан в существующем каталоге, SRC не тронут.
-6. **неподдержанный тип** (`.txt`) в offline → exit 1.
-7. **`--no-metadata` на jpeg** → DST валиден, тег `Orientation` сохранён, остальной EXIF сброшен.
+1. **offline jpeg** → DST smaller than SRC and a valid JPEG.
+2. **offline png palette** (≤256 colours, 8-bit) → DST a valid PNG, not larger than SRC.
+3. **offline png photo** (>256 colours) → DST a valid PNG (lossless path runs without error).
+4. **in-place** (`SRC==DST`) → file optimized in place, still valid.
+5. **SRC≠DST** → DST created in an existing directory, SRC untouched.
+6. **unsupported type** (`.txt`) in offline → exit 1.
+7. **`--no-metadata` on a jpeg** → DST valid, `Orientation` tag kept, other EXIF dropped.
 
-Регрессия:
-- `tests/behavior/test_compresspdf.sh` продолжает проходить (теперь через optimizeimage).
-- Минимальный `test_tinifyimage.sh`: offline на сгенерированном jpeg → валидный `optimized/<name>`
-  меньше исходного (обёртка работает end-to-end).
+Regression:
+- `tests/behavior/test_compresspdf.sh` keeps passing (now via optimizeimage).
+- A minimal `test_tinifyimage.sh`: offline on a generated jpeg → a valid `optimized/<name>`
+  smaller than the source (wrapper works end-to-end).
 
-Не проверяем: не-jpg/png PDF продолжают падать в `compresspdf` как сегодня (это существующий сбой,
-а не регрессия). Online (Tinify) автоматически не тестируется (нужны ключ и сеть).
+Not asserted: non-jpg/png PDFs keep failing in `compresspdf` as they do today (a pre-existing
+failure, not a regression). Online (Tinify) paths are not tested automatically (need key +
+network).
