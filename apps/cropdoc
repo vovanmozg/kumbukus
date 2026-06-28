@@ -1,0 +1,67 @@
+#!/bin/bash
+
+# requirement: vendor/docscanner
+#
+# Detect a document in a photo, deskew and crop it to its borders using
+# docscanner, writing the result into a sibling `cropped/` folder next to the
+# source (the original is left untouched), mirroring crop_scans / tinifyimage.sh.
+#
+# docscanner is expected at /opt/docscanner/docscanner with the interface:
+#   docscanner [--mode=enhance|original] <input.jpg> <output.jpg>
+
+DOCSCANNER="/opt/docscanner/docscanner"
+MODE=enhance
+SOURCE_FILE=""
+
+usage() {
+    cat <<EOF
+Usage: $0 [--mode=enhance|original] FILE
+
+  --mode=enhance   (default) crop + enhance contrast/colors of the document
+  --mode=original  crop only, keep original colors
+  -h, --help       show this help
+
+Result goes to ./cropped/FILE next to the source; the original is untouched.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --mode=*)      MODE="${1#*=}" ;;
+        --mode)        shift; MODE="$1" ;;
+        enhance|original) MODE="$1" ;;
+        -h|--help)     usage; exit 0 ;;
+        -*)            echo "Unknown option: $1" >&2; usage; exit 1 ;;
+        *)             SOURCE_FILE="$1" ;;
+    esac
+    shift
+done
+
+if [ -z "$SOURCE_FILE" ]; then
+    usage; exit 1
+fi
+if [ ! -f "$SOURCE_FILE" ]; then
+    echo "No such file: $SOURCE_FILE" >&2; exit 1
+fi
+if [ ! -x "$DOCSCANNER" ]; then
+    echo "docscanner not found at $DOCSCANNER" >&2; exit 1
+fi
+case "$MODE" in
+    enhance|original) ;;
+    *) echo "Invalid mode: $MODE (expected enhance|original)" >&2; exit 1 ;;
+esac
+
+FILE_NAME=$(basename "$SOURCE_FILE")
+CROPPED_DIR="$(dirname "$SOURCE_FILE")/cropped"
+mkdir -p "$CROPPED_DIR"
+CROPPED_FILE="${CROPPED_DIR}/${FILE_NAME}"
+
+"$DOCSCANNER" --mode="$MODE" "$SOURCE_FILE" "$CROPPED_FILE"
+
+if [ -f "$CROPPED_FILE" ]; then
+    touch -r "$SOURCE_FILE" "$CROPPED_FILE"
+    echo "Crop finished ($MODE): $CROPPED_FILE"
+else
+    echo "docscanner produced no output for: $SOURCE_FILE" >&2
+    exit 1
+fi
