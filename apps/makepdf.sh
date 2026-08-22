@@ -1,10 +1,13 @@
 #!/bin/bash
 
-# requirement: vendor/imagemagick
+# requirement: vendor/img2pdf
 #
 # Make a PDF from images.
 #   makepdf.sh <directory>    combine *.jpg/*.png in the folder into <directory>.pdf
 #   makepdf.sh <image-file>   convert a single image into <name>.pdf next to it
+# Images are embedded as-is via img2pdf (no re-encoding), so the PDF stays
+# close to the sum of the source file sizes instead of being bloated by a
+# JPEG re-encode.
 # Output is written next to the input and never overwrites: if the target
 # exists, <base>-1.pdf, <base>-2.pdf, ... is used instead.
 
@@ -42,4 +45,4 @@ while [ -e "$out" ]; do
     i=$((i + 1))
 done
 
-convert "${imgs[@]}" "$out"
+img2pdf "${imgs[@]}" -o "$out"
