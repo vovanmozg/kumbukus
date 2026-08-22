@@ -1,4 +1,4 @@
-# docscanner — single static CLI binary: perspective-corrects + enhances a JPEG
+# cropdoc — single static CLI binary: perspective-corrects + enhances a JPEG
 # photo of a document. Installed to /opt/cropdoc.
 
 # check: test -x /opt/cropdoc/cropdoc
